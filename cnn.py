@@ -61,8 +61,8 @@ class Filter(object):
     def __init__(self, width, height, depth):
         self.weights = np.random.uniform(-1e-1, 1e-1, (depth, height, width))
         self.bias = 0
-        self.weight_gard = np.zeros(self.weights.shape)
-        self.bias_gard = 0
+        self.weights_grad = np.zeros(self.weights.shape)
+        self.bias_grad = 0
 
     def __repr__(self):
         return 'filter weights:\n%s\nbias:\n%s' % (repr(self.weights), repr(self.bias))
@@ -74,8 +74,8 @@ class Filter(object):
         return self.bias
 
     def update(self, learning_rate):
-        self.weights -= learning_rate*self.weight_gard
-        self.bias -= learning_rate*self.bias_gard
+        self.weights -= learning_rate*self.weights_grad
+        self.bias -= learning_rate*self.bias_grad
 
 
 class ConvLayer(object):
@@ -152,7 +152,7 @@ class ConvLayer(object):
         for f in range(self.filter_number):
             filter = self.filters[f]
             for d in range(filter.weights.shape[0]):
-                conv(self.padded_input_array[d], expand_array[f], filter.weight_gard[d], 1, 0)
+                conv(self.padded_input_array[d], expand_array[f], filter.weights_grad[d], 1, 0)
             filter.bias_gard = expand_array[f].sum()
 
     def create_delta_array(self):
@@ -284,10 +284,11 @@ def gradient_check():
                 cl.filters[0].weights[d, i, j] -= 2 * epsilon
                 cl.forward(a)
                 err2 = error_function(cl.output_array)
+                print('err1:', err1, 'err2:', err2)
                 expect_grad = (err1 - err2) / (2 * epsilon)
                 cl.filters[0].weights[d, i, j] += epsilon
                 print('weights(%d,%d,%d): expected - actural %f - %f'
-                      % (d, i, j, expect_grad, cl.filters[0].weight_grad[d, i, j]))
+                      % (d, i, j, expect_grad, cl.filters[0].weights_grad[d, i, j]))
 
 
 def init_pool_test():

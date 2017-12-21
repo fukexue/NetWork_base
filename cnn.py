@@ -31,8 +31,8 @@ def conv(input_array, kernel_array, output_array, stride, bias):
     kernel_height = kernel_array.shape[-2]
     for i in range(output_height):
         for j in range(output_weight):
-            output_array[i, j] = (get_patch(input_array, i, j, kernel_height, kernel_weight, stride) * kernel_array).\
-                                     sum() + bias
+            p = get_patch(input_array, i, j, kernel_height, kernel_weight, stride) * kernel_array
+            output_array[i, j] = p.sum() + bias
 
 
 def padding(input_array, zp):
@@ -40,15 +40,17 @@ def padding(input_array, zp):
         return input_array
     else:
         if input_array.ndim == 3:
-            input_weight = input_array.shape[2]
+            input_width = input_array.shape[2]
             input_height = input_array.shape[1]
             input_depth = input_array.shape[0]
-            padded_array = np.zeros((input_depth, input_height+zp*2, input_weight+zp*2))
+            padded_array = np.zeros((input_depth, input_height+zp*2, input_width+zp*2))
+            padded_array[:, zp:input_height+zp, zp:input_width+zp] = input_array
             return padded_array
         elif input_array.ndim == 2:
-            input_weight = input_array[1]
+            input_width = input_array[1]
             input_height = input_array[0]
-            padded_array = np.zeros((input_height+zp*2, input_weight+zp*2))
+            padded_array = np.zeros((input_height+zp*2, input_width+zp*2))
+            padded_array[zp:input_height+zp, zp:input_width+zp] = input_array
             return padded_array
 
 
@@ -95,21 +97,21 @@ class ConvLayer(object):
         self.filters = []
         for i in range(filter_number):
             self.filters.append(Filter(filter_width, filter_height, self.channel_number))
-
         self.output_width = self.calculate_output_size(input_width, filter_width, zero_padding, stride)
         self.output_heigth = self.calculate_output_size(input_height, filter_height, zero_padding, stride)
-        self.output_array = np.zeros((self.filter_number, self.output_heigth, self.output_width))
+        self.output_array = np.zeros((self.filter_number, self.output_heigth, self.output_width), dtype=np.float64)
 
     @staticmethod
     def calculate_output_size(input_size, filter_size, zero_padding, stride):
-        return (input_size - filter_size - 2*zero_padding)//stride + 1
+        return (input_size - filter_size + 2*zero_padding)//stride + 1
 
     def forward(self, input_array):
         self.input_array = input_array
         self.padded_input_array = padding(input_array, self.zero_padding)
         for f in range(self.filter_number):
             filter = self.filters[f]
-            conv(self.input_array, filter.get_weight(), self.output_array, self.stride, filter.get_bias())
+# 公式：输入层扩展，与卷积层中的权重进行卷积运算加偏置项，得到预测输出。
+            conv(self.padded_input_array, filter.get_weight(), self.output_array[f], self.stride, filter.get_bias())
         element_wise_op(self.output_array, self.activator.forward)
 
     def backward(self, input_array, sensitivity_array, activator):
@@ -152,6 +154,8 @@ class ConvLayer(object):
         for f in range(self.filter_number):
             filter = self.filters[f]
             for d in range(filter.weights.shape[0]):
+                # print('self.padded_input_array[d]:', self.padded_input_array[d])
+                # print('expand_array[f]:', expand_array[f])
                 conv(self.padded_input_array[d], expand_array[f], filter.weights_grad[d], 1, 0)
             filter.bias_gard = expand_array[f].sum()
 
@@ -255,13 +259,15 @@ def test_bp():
     print(cl.filters[1])
 
 
+# 设计一个误差函数，取所有节点输出项之和
+def error_function(o):
+    return o.sum()
+
+
 def gradient_check():
     '''
     梯度检查
     '''
-    # 设计一个误差函数，取所有节点输出项之和
-    def error_function(o):
-        return o.sum()
 
     # 计算forward值
     a, b, cl = init_test()
@@ -278,10 +284,14 @@ def gradient_check():
     for d in range(cl.filters[0].weights_grad.shape[0]):
         for i in range(cl.filters[0].weights_grad.shape[1]):
             for j in range(cl.filters[0].weights_grad.shape[2]):
+                print('old:', cl.filters[0].weights[d, i, j])
                 cl.filters[0].weights[d, i, j] += epsilon
+                print('new:', cl.filters[0].weights[d, i, j])
                 cl.forward(a)
                 err1 = error_function(cl.output_array)
+                print('2old:', cl.filters[0].weights[d, i, j])
                 cl.filters[0].weights[d, i, j] -= 2 * epsilon
+                print('2new:', cl.filters[0].weights[d, i, j])
                 cl.forward(a)
                 err2 = error_function(cl.output_array)
                 print('err1:', err1, 'err2:', err2)
